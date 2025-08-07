@@ -1,0 +1,165 @@
+function speech_gui_app()
+    % تعريف المتغيرات الجلوبال في أول السطر
+    global y fs filtered_y t player_orig player_filt dark_mode ax titleText;
+
+    % النافذة الرئيسية
+    f = figure('Name', '🎤 Intelligent Speech Signal Analyzer - GUI Version', ...
+               'NumberTitle', 'off', 'Position', [300 100 800 700], 'Color', [0.95 0.95 1]);
+
+    % العنوان
+    titleText = uicontrol('Style', 'text', 'Position', [180 640 440 30], ...
+        'String', '💥 Intelligent Speech Signal Analyzer 💥', ...
+        'FontSize', 16, 'FontWeight', 'bold', 'BackgroundColor', [0.95 0.95 1]);
+
+    %% الأزرار
+    uicontrol('Style', 'pushbutton', 'String', '🎙️ Record', ...
+        'Position', [40 590 120 40], 'FontSize', 12, 'Callback', @recordAudio);
+
+    uicontrol('Style', 'pushbutton', 'String', '📁 Upload', ...
+        'Position', [180 590 120 40], 'FontSize', 12, 'Callback', @uploadAudio);
+
+    uicontrol('Style', 'pushbutton', 'String', '📊 Analyze', ...
+        'Position', [320 590 120 40], 'FontSize', 12, 'Callback', @analyzeAudio);
+
+    uicontrol('Style', 'pushbutton', 'String', '▶️ Original', ...
+        'Position', [470 590 100 40], 'FontSize', 12, 'Callback', @playOriginal);
+
+    uicontrol('Style', 'pushbutton', 'String', '🎧 Filtered', ...
+        'Position', [580 590 100 40], 'FontSize', 12, 'Callback', @playFiltered);
+
+    uicontrol('Style', 'togglebutton', 'String', '🌙 Dark Mode', ...
+        'Position', [690 590 100 40], 'FontSize', 12, 'Callback', @toggleDarkMode);
+
+    %% مكان رسم الإشارة
+    ax = axes('Parent', f, 'Units', 'pixels', 'Position', [50 200 700 280]);
+    title(ax, 'Signal will appear here', 'FontSize', 12);
+
+    %% معلومات FFT أسفل الرسم
+    uicontrol('Style', 'text', 'Position', [50 170 700 20], 'String', '', ...
+              'FontSize', 11, 'Tag', 'fft_info', 'HorizontalAlignment', 'center', ...
+              'BackgroundColor', [0.9 0.9 0.9]);
+
+    %% صندوق لأسماء المطورين
+    uicontrol('Style','frame','Position',[200 10 400 70],'BackgroundColor',[0.8 0.8 0.9]);
+
+    uicontrol('Style','text','Position',[210 50 380 20],'String','Developed By:', ...
+        'FontSize', 12, 'FontWeight', 'bold', 'BackgroundColor',[0.8 0.8 0.9]);
+
+    uicontrol('Style','text','Position',[210 25 380 20],'String', ...
+        'Eng. Ali H Omara (210071) & Eng. Abdullah M. Mustafa (210111)', ...
+        'FontSize', 11, 'FontWeight', 'bold', 'BackgroundColor', [0.8 0.8 0.9]);
+
+    function recordAudio(~, ~)
+        global y fs t ax
+        fs = 44100;
+        recObj = audiorecorder(fs, 16, 1);
+        msgbox('Recording for 5 seconds...');
+        recordblocking(recObj, 5);
+        y = getaudiodata(recObj);
+        t = (0:length(y)-1)/fs;
+        plot(ax, t, y); title(ax, 'Recorded Signal');
+    end
+
+    function uploadAudio(~, ~)
+        global y fs t ax
+        [file, path] = uigetfile({'*.wav;*.mp3;*.opus'}, 'Select an Audio File');
+        if isequal(file, 0), return; end
+        [y, fs] = audioread(fullfile(path, file));
+        y = mean(y, 2);
+        t = (0:length(y)-1)/fs;
+        plot(ax, t, y); title(ax, 'Uploaded Signal');
+    end
+
+    function playOriginal(~, ~)
+        global y fs player_orig
+        if isempty(y), msgbox('Upload or record audio first.'); return; end
+        player_orig = audioplayer(y, fs);
+        play(player_orig);
+    end
+
+    function playFiltered(~, ~)
+        global filtered_y fs player_filt
+        if isempty(filtered_y), msgbox('Analyze first to generate filtered signal.'); return; end
+        player_filt = audioplayer(filtered_y, fs);
+        play(player_filt);
+    end
+
+    function analyzeAudio(~, ~)
+        global y fs filtered_y ax dark_mode
+        if isempty(y), msgbox('No signal found.'); return; end
+
+        N = length(y);
+        Y = fft(y);
+        f_vals = (0:N-1)*(fs/N);
+        mag = abs(Y(1:floor(N/2)));
+        f_vals = f_vals(1:floor(N/2));
+
+        filtered_y = wiener2(double(y), [5 1]);
+
+        [~, maxIdx] = max(mag);
+        dominantFreq = f_vals(maxIdx);
+        meanFreq = sum(f_vals .* mag') / sum(mag);
+
+        t = (0:length(y)-1)/fs;
+        cla(ax); hold(ax, 'on');
+        plot(ax, t, y, 'b'); 
+        plot(ax, t, filtered_y, 'r');
+        legend(ax, {'Original', 'Filtered'});
+        title(ax, 'Signal Before & After Filtering');
+
+        fftStr = sprintf('Dominant Freq: %.2f Hz | Mean Freq: %.2f Hz', dominantFreq, meanFreq);
+        set(findobj('Tag','fft_info'), 'String', fftStr);
+
+        totalDuration = length(y) / fs;
+        avgAmplitude = mean(abs(y));
+        silenceThreshold = 0.02;
+        silenceDuration = sum(abs(y) < silenceThreshold) / fs;
+        estSpeechRate = (totalDuration - silenceDuration) / 0.4;
+
+        data = {
+            'Total Duration (s)', sprintf('%.2f', totalDuration);
+            'Average Amplitude', sprintf('%.4f', avgAmplitude);
+            'Estimated Speech Rate (words/sec)', sprintf('%.2f', estSpeechRate);
+            'Silence Duration (s)', sprintf('%.2f', silenceDuration);
+            'Dominant Frequency (Hz)', sprintf('%.2f', dominantFreq);
+            'Mean Frequency (Hz)', sprintf('%.2f', meanFreq);
+        };
+
+        fig_summary = figure('Name', '📋 Signal Analysis Summary', ...
+                             'NumberTitle', 'off', 'Position', [200 200 400 250]);
+
+        if dark_mode
+            set(fig_summary, 'Color', [0.1 0.1 0.1]);
+            uitable(fig_summary, 'Data', data, ...
+                'ColumnName', {'Metric', 'Value'}, ...
+                'ColumnWidth', {200, 100}, ...
+                'FontSize', 11, 'BackgroundColor', [0.2 0.2 0.2], ...
+                'ForegroundColor', 'w', 'Position', [20 30 360 200]);
+        else
+            set(fig_summary, 'Color', [1 1 1]);
+            uitable(fig_summary, 'Data', data, ...
+                'ColumnName', {'Metric', 'Value'}, ...
+                'ColumnWidth', {200, 100}, ...
+                'FontSize', 11, 'Position', [20 30 360 200]);
+        end
+    end
+
+    function toggleDarkMode(src, ~)
+        global dark_mode ax titleText
+        dark_mode = get(src, 'Value');
+
+        if dark_mode
+            set(gcf, 'Color', [0.1 0.1 0.1]);
+            set(ax, 'Color', [0.3 0.3 0.3], 'XColor', 'w', 'YColor', 'w');
+            set(get(ax, 'Title'), 'Color', 'w');
+            set(titleText, 'BackgroundColor', [0.1 0.1 0.1], 'ForegroundColor', 'w');
+            set(findobj('Tag','fft_info'), 'BackgroundColor', [0.2 0.2 0.2], 'ForegroundColor', 'w');
+        else
+            set(gcf, 'Color', [0.95 0.95 1]);
+            set(ax, 'Color', 'w', 'XColor', 'k', 'YColor', 'k');
+            set(get(ax, 'Title'), 'Color', 'k');
+            set(titleText, 'BackgroundColor', [0.95 0.95 1], 'ForegroundColor', 'k');
+            set(findobj('Tag','fft_info'), 'BackgroundColor', [0.9 0.9 0.9], 'ForegroundColor', 'k');
+        end
+    end
+end
